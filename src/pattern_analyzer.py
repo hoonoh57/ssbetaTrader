@@ -11,15 +11,23 @@ import numpy as np
 import mysql.connector
 import json
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple
+from dotenv import load_dotenv
+
+# .env 파일 로드
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 log = logging.getLogger("PatternAnalyzer")
 
 MYSQL_CONFIG = {
-    "host": "localhost", "user": "root", "password": "",
-    "database": "stock_minutes", "charset": "utf8mb4"
+    "host": os.getenv("MYSQL_HOST", "localhost"),
+    "user": os.getenv("MYSQL_USER", "root"),
+    "password": os.getenv("MYSQL_PASSWORD", ""),
+    "database": os.getenv("MYSQL_DATABASE", "stock_minutes"),
+    "charset": os.getenv("MYSQL_CHARSET", "utf8mb4")
 }
 
 SIGNAL_CODE = "005930"

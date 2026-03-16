@@ -11,8 +11,13 @@ import requests
 import mysql.connector
 import time
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
+from dotenv import load_dotenv
+
+# .env 파일 로드
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,14 +29,14 @@ logging.basicConfig(
 )
 log = logging.getLogger("MinuteDownloader")
 
-# ─── 설정 ───
-BASE_URL = "http://localhost:8082"
+# ─── 설정 (.env 파일에서 로드) ───
+BASE_URL = os.getenv("SERVER_API_BASE_URL", "http://localhost:8082")
 MYSQL_CONFIG = {
-    "host": "localhost",
-    "user": "root",
-    "password": "",
-    "database": "stock_minutes",
-    "charset": "utf8mb4"
+    "host": os.getenv("MYSQL_HOST", "localhost"),
+    "user": os.getenv("MYSQL_USER", "root"),
+    "password": os.getenv("MYSQL_PASSWORD", ""),
+    "database": os.getenv("MYSQL_DATABASE", "stock_minutes"),
+    "charset": os.getenv("MYSQL_CHARSET", "utf8mb4")
 }
 
 # 대상 종목
@@ -47,10 +52,10 @@ TARGET_STOCKS = {
 }
 
 # 다운로드 설정
-TICK_UNITS = [5]           # 분봉 단위: [1, 5] 등 복수 가능
-MONTHS_BACK = 6            # 6개월
-API_DELAY = 0.55           # 요청 간격 (초) — 키움 1초 5회 제한 대응
-MAX_ROWS_PER_REQUEST = 900 # 서버 1회 응답 최대
+TICK_UNITS = [int(t) for t in os.getenv("TICK_UNITS", "5").split(",")]
+MONTHS_BACK = int(os.getenv("MONTHS_BACK", "6"))
+API_DELAY = float(os.getenv("API_DELAY", "0.55"))
+MAX_ROWS_PER_REQUEST = int(os.getenv("MAX_ROWS_PER_REQUEST", "900"))
 
 
 class MinuteDownloader:

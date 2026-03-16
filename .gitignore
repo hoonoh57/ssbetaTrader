@@ -54,3 +54,4 @@ Thumbs.db
 # Config (민감한 정보)
 config.local.py
 .env
+.env.local

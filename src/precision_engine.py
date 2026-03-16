@@ -9,8 +9,13 @@
 
 import mysql.connector
 import json
+import os
 from typing import Dict, List, Tuple
 from dataclasses import dataclass
+from dotenv import load_dotenv
+
+# .env 파일 로드
+load_dotenv()
 
 # 종목명 매핑
 STOCK_NAMES = {
@@ -186,11 +191,11 @@ class PrecisionEngine:
 
 if __name__ == "__main__":
     mysql_config = {
-        "host": "localhost",
-        "user": "root",
-        "password": "",
-        "database": "stock_minutes",
-        "charset": "utf8mb4"
+        "host": os.getenv("MYSQL_HOST", "localhost"),
+        "user": os.getenv("MYSQL_USER", "root"),
+        "password": os.getenv("MYSQL_PASSWORD", ""),
+        "database": os.getenv("MYSQL_DATABASE", "stock_minutes"),
+        "charset": os.getenv("MYSQL_CHARSET", "utf8mb4")
     }
 
     engine = PrecisionEngine(mysql_config)
