@@ -4,7 +4,8 @@
 
 param(
     [string]$Command = "help",
-    [string]$Date = ""
+    [string]$Date = "",
+    [string]$EndDate = ""
 )
 
 function Show-Help {
@@ -14,11 +15,13 @@ function Show-Help {
     Write-Host "============================================" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "사용법:" -ForegroundColor Yellow
-    Write-Host "  .\sync_trading_system.ps1 setup              - 최초 셋업 (DB 생성 + 6개월 다운로드 + 분석)" -ForegroundColor White
-    Write-Host "  .\sync_trading_system.ps1 daily              - 매일 장 후 증분 업데이트" -ForegroundColor White
-    Write-Host "  .\sync_trading_system.ps1 backtest [YYYYMMDD] - 특정 일자 장중 백테스트" -ForegroundColor White
-    Write-Host "  .\sync_trading_system.ps1 live               - 실시간 매매" -ForegroundColor White
-    Write-Host "  .\sync_trading_system.ps1 analyze            - 패턴 재분석만" -ForegroundColor White
+    Write-Host "  .\sync_trading_system.ps1 setup                    - 최초 셋업 (DB 생성 + 6개월 다운로드 + 분석)" -ForegroundColor White
+    Write-Host "  .\sync_trading_system.ps1 daily                    - 매일 장 후 증분 업데이트" -ForegroundColor White
+    Write-Host "  .\sync_trading_system.ps1 backtest                 - 전체 기간 백테스트" -ForegroundColor White
+    Write-Host "  .\sync_trading_system.ps1 backtest YYYYMMDD        - 특정 일자 장중 백테스트" -ForegroundColor White
+    Write-Host "  .\sync_trading_system.ps1 backtest YYYYMMDD YYYYMMDD - 기간 지정 백테스트" -ForegroundColor White
+    Write-Host "  .\sync_trading_system.ps1 live                     - 실시간 매매" -ForegroundColor White
+    Write-Host "  .\sync_trading_system.ps1 analyze                  - 패턴 재분석만" -ForegroundColor White
     Write-Host ""
 }
 
@@ -68,15 +71,27 @@ function Invoke-Daily {
 }
 
 function Invoke-Backtest {
-    param([string]$TestDate)
+    param(
+        [string]$TestDate,
+        [string]$EndDate = ""
+    )
     
     if ([string]::IsNullOrEmpty($TestDate)) {
-        $TestDate = (Get-Date).ToString("yyyyMMdd")
+        # 전체 6개월 백테스트
+        Write-Host ""
+        Write-Host "전체 기간 백테스트" -ForegroundColor Green
+        & python src/sync_trader.py backtest
+    } elseif (-not [string]::IsNullOrEmpty($EndDate)) {
+        # 기간 지정 백테스트
+        Write-Host ""
+        Write-Host "기간 백테스트: $TestDate ~ $EndDate" -ForegroundColor Green
+        & python src/sync_trader.py backtest $TestDate $EndDate
+    } else {
+        # 특정 일자 장중 백테스트
+        Write-Host ""
+        Write-Host "장중 백테스트: $TestDate" -ForegroundColor Green
+        & python src/sync_trader.py intraday $TestDate
     }
-    
-    Write-Host ""
-    Write-Host "장중 백테스트: $TestDate" -ForegroundColor Green
-    & python src/sync_trader.py intraday $TestDate
     Write-Host ""
 }
 
@@ -99,7 +114,7 @@ function Invoke-Analyze {
 switch ($Command.ToLower()) {
     "setup"     { Invoke-Setup }
     "daily"     { Invoke-Daily }
-    "backtest"  { Invoke-Backtest -TestDate $Date }
+    "backtest"  { Invoke-Backtest -TestDate $Date -EndDate $EndDate }
     "live"      { Invoke-Live }
     "analyze"   { Invoke-Analyze }
     default     { Show-Help }

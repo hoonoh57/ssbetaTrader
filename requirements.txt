@@ -1,5 +1,7 @@
 mysql-connector-python==8.0.33
-pandas==1.5.3
-numpy==1.25.2
+pandas>=1.5.3
+numpy>=1.25.2
 requests==2.31.0
 python-dotenv==1.0.0
+lightweight-charts>=2.0
+websocket-client>=1.7.0

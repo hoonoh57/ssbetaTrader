@@ -161,15 +161,14 @@ class PrecisionEngine:
         )
         return round(max(0.1, min(1.0, weight)), 2)
 
-    def should_trade_at_hour(self, code: str, hour: int) -> bool:
+    def should_trade_at_hour(self, code: str, hour: int, minute: int = 0) -> bool:
         """
         시간대별 매매 가능 여부
-
-        분석 결과에서 특정 시간대의 반응률이 낮으면 매매 회피
-        (detail_json의 hourly 통계 활용)
+        09:15 이전 노이즈 구간 / 15:00 이후 마감 구간 회피
         """
-        # 기본 규칙: 09:00~09:15 노이즈 구간 회피, 14:30 이후 회피
-        if hour < 9 or (hour == 9):  # 09:15 이후만 허용
+        if hour < 9:
+            return False
+        if hour == 9 and minute < 15:
             return False
         if hour >= 15:
             return False
