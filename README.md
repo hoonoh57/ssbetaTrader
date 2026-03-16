@@ -65,7 +65,30 @@ ssbetaTrader/
 pip install -r requirements.txt
 ```
 
-### 2. DB 셋업
+### 2. 환경 설정 (.env)
+
+`.env` 파일에 DB 및 API 설정을 저장합니다:
+
+```bash
+# .env.example에서 복사
+cp .env.example .env
+
+# 텍스트 에디터로 열어서 수정
+code .env
+```
+
+**필수 수정 항목:**
+```ini
+MYSQL_HOST=localhost
+MYSQL_USER=root
+MYSQL_PASSWORD=your_password  # ← 실제 DB 비밀번호 입력
+MYSQL_DATABASE=stock_minutes
+SERVER_API_BASE_URL=http://localhost:8082
+```
+
+📖 **상세 설정 가이드:** [CONFIG.md](CONFIG.md) 참조
+
+### 3. DB 셋업
 
 ```bash
 # MySQL에 직접 실행 (Windows 터미널에서)
@@ -74,7 +97,7 @@ mysql -u root -p < sql/schema.sql
 
 또는 MySQL Workbench에서 `sql/schema.sql` 파일을 열어 실행
 
-### 3. 초기 셋업 (6개월 데이터 다운로드)
+### 4. 초기 셋업 (6개월 데이터 다운로드)
 
 ```powershell
 # Windows PowerShell에서
@@ -86,7 +109,7 @@ mysql -u root -p < sql/schema.sql
 - 분석: 5~10분
 - 총: 약 1~2시간
 
-### 4. 매일 증분 업데이트
+### 5. 매일 증분 업데이트
 
 ```powershell
 # 매일 장 마감 후 실행
@@ -141,9 +164,26 @@ mysql -u root -p < sql/schema.sql
 
 ## 🛠️ 설정 변경
 
+### 환경 변수 설정 (.env 파일)
+
+모든 설정은 `.env` 파일에서 관리됩니다:
+
+```bash
+code .env
+```
+
+📖 **상세 가이드:** [CONFIG.md](CONFIG.md) 참조
+
+**주요 설정 항목:**
+- `MYSQL_PASSWORD`: DB 비밀번호 (필수!)
+- `MYSQL_HOST`: MySQL 서버 주소
+- `SERVER_API_BASE_URL`: 키움 API 주소
+- `MONTHS_BACK`: 다운로드 기간(개월)
+- `TICK_UNITS`: 분봉 단위 (예: 5, 또는 1,5,10 여러 개)
+
 ### 다운로드 대상 종목 변경
 
-`src/minute_downloader.py`:
+`src/minute_downloader.py` (코드 수정 필요):
 ```python
 TARGET_STOCKS = {
     "005930": "삼성전자",      # 신호 종목 (필수)
@@ -155,32 +195,33 @@ TARGET_STOCKS = {
 
 ### 분봉 단위 변경
 
-`src/minute_downloader.py`:
-```python
-TICK_UNITS = [5]                        # 5분봉
-TICK_UNITS = [1, 5, 10, 15, 30, 60]   # 여러 단위 동시 다운로드
+`.env` 파일에서:
+```ini
+# 5분봉만
+TICK_UNITS=5
+
+# 여러 단위 (1분, 5분, 10분, 30분)
+TICK_UNITS=1,5,10,30
 ```
 
 ### MySQL 연결 설정
 
-모든 Python 파일의 `MYSQL_CONFIG`:
-```python
-MYSQL_CONFIG = {
-    "host": "localhost",
-    "user": "root",
-    "password": "your_password",  # 변경
-    "database": "stock_minutes",
-    "charset": "utf8mb4"
-}
+`.env` 파일에서:
+```ini
+MYSQL_HOST=localhost
+MYSQL_USER=root
+MYSQL_PASSWORD=your_password
+MYSQL_DATABASE=stock_minutes
+MYSQL_CHARSET=utf8mb4
 ```
 
 ### API 레이트 제한
 
-`src/minute_downloader.py`:
-```python
-API_DELAY = 0.55    # 요청 간격 (초)
-                    # 키움 1초 5회 제한 → 약 0.2초 최소
-                    # 안정성을 위해 0.5~1.0초 권장
+`.env` 파일에서:
+```ini
+API_DELAY=0.55    # 요청 간격 (초)
+                  # 키움 1초 5회 제한 → 약 0.2초 최소
+                  # 안정성을 위해 0.5~1.0초 권장
 ```
 
 ## 📊 DB 스키마
