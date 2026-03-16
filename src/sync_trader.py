@@ -181,8 +181,38 @@ class DBClient:
         return days
 
     def save_backtest_result(self, result: dict):
-        """백테스트 결과 DB 저장"""
+        """
+        백테스트 결과 DB 저장
+
+        [수정] trades 건수가 500건 초과 시 trades_json에는
+        요약만 저장하고, 전체 내역은 data/ 폴더에 JSON 파일로 분리
+        """
         cursor = self.conn.cursor()
+
+        trades = result.get("trades", [])
+        trades_json_str = ""
+
+        if len(trades) > 500:
+            # 파일로 분리 저장
+            os.makedirs("data", exist_ok=True)
+            filename = (
+                f"data/trades_{result['strategy_name']}_"
+                f"{result['period_start']}_{result['period_end']}.json"
+            )
+            with open(filename, "w", encoding="utf-8") as f:
+                json.dump(trades, f, ensure_ascii=False, default=str, indent=2)
+
+            # DB에는 요약만
+            trades_json_str = json.dumps({
+                "total_count": len(trades),
+                "file": filename,
+                "top_winners": sorted(trades, key=lambda t: t.get("pnl_pct", 0), reverse=True)[:10],
+                "top_losers": sorted(trades, key=lambda t: t.get("pnl_pct", 0))[:10],
+            }, ensure_ascii=False, default=str)
+            log.info(f"  매매 내역 {len(trades)}건 → {filename} 분리 저장")
+        else:
+            trades_json_str = json.dumps(trades, ensure_ascii=False, default=str)
+
         sql = """
             INSERT INTO backtest_results
                 (strategy_name, run_date, period_start, period_end, tick,
@@ -198,7 +228,7 @@ class DBClient:
             result["win_rate"], result["total_pnl_pct"], result["max_drawdown"],
             result["avg_hold_minutes"], result.get("sharpe_ratio"),
             json.dumps(result.get("params", {}), ensure_ascii=False),
-            json.dumps(result.get("trades", []), ensure_ascii=False, default=str),
+            trades_json_str,
         ))
         self.conn.commit()
         cursor.close()
@@ -315,10 +345,37 @@ class SyncTradeEngine:
 
     @staticmethod
     def add_all_ma(df: pd.DataFrame) -> pd.DataFrame:
+        """
+        MA 계산 — 일간 경계를 넘지 않도록 거래일별 그룹 내에서 rolling
+
+        [수정 이유]
+        기존 코드는 단순 rolling으로 전일 종가가 당일 MA에 포함되어
+        09:00~09:25 구간(MA20 형성 전)에서 전일 가격이 혼입됨.
+        pattern_analyzer.py의 add_ma와 동일한 방식으로 통일.
+
+        단일 일자 데이터(simulate_day → load_day_minutes)에서는
+        차이 없으나, 기간 데이터(RealtimeHandler._init_buffers)에서
+        장 경계 오염을 방지함.
+        """
         df = df.copy()
-        for p in MA_PERIODS:
-            df[f"ma{p}"] = df["close"].rolling(window=p, min_periods=p).mean()
-        return df
+
+        # date 컬럼이 없으면 생성
+        if "date" not in df.columns:
+            df["date"] = pd.to_datetime(df["dt"]).dt.date
+
+        result_parts = []
+        for _, group in df.groupby("date"):
+            g = group.copy()
+            for p in MA_PERIODS:
+                g[f"ma{p}"] = g["close"].rolling(window=p, min_periods=p).mean()
+            result_parts.append(g)
+
+        if not result_parts:
+            for p in MA_PERIODS:
+                df[f"ma{p}"] = np.nan
+            return df
+
+        return pd.concat(result_parts).reset_index(drop=True)
 
     # ─── 삼성전자 신호 판단 ───
     def check_samsung_signal(self, row: pd.Series, prev_row: Optional[pd.Series] = None) -> str:
@@ -519,6 +576,9 @@ class Backtester:
 
         df_sig = data[SIGNAL_CODE]
 
+        # [수정] dt 초기값 — 루프 미진입 시 장 마감 청산에서 사용
+        dt = df_sig.iloc[-1]["dt"]
+
         # ─── 분봉 순회 ───
         for i in range(1, len(df_sig)):
             row = df_sig.iloc[i]
@@ -596,6 +656,7 @@ class Backtester:
                             result.trades.append(sl)
 
         # ─── 장 마감 미청산 포지션 강제 정리 ───
+        # [수정] dt는 위에서 초기화됨 — 루프 미진입 시에도 안전
         if self.engine.positions:
             close_prices = {}
             for code in list(self.engine.positions.keys()):
@@ -1105,6 +1166,10 @@ class RealtimeHandler:
     매 분봉 완성 시 SyncTradeEngine으로 신호 판단 + 주문 발행
     """
 
+    # ─── 상수: API 재시도 설정 ───
+    MAX_RETRIES = 3
+    RETRY_DELAY = 1.0  # 초
+
     def __init__(self):
         self.db = DBClient()
         try:
@@ -1130,8 +1195,25 @@ class RealtimeHandler:
             self.candle_buffers[code] = df
 
     def _fetch_latest_candles(self, code: str) -> pd.DataFrame:
-        """서버에서 최신 분봉 가져와서 버퍼 갱신"""
-        rows = self.server.get_minute_candles(code, TICK)
+        """
+        서버에서 최신 분봉 가져와서 버퍼 갱신
+
+        [수정 사항]
+        1. API 호출 실패 시 최대 3회 재시도 (1초 간격)
+        2. MA 계산 시 당일 데이터만 사용하여 장 간 경계 오염 방지
+           (add_all_ma가 groupby("date")로 변경되었으므로 자동 적용)
+        """
+        rows = None
+        for attempt in range(1, self.MAX_RETRIES + 1):
+            try:
+                rows = self.server.get_minute_candles(code, TICK)
+                if rows:
+                    break
+            except Exception as e:
+                log.warning(f"  API 재시도 {attempt}/{self.MAX_RETRIES}: {code} — {e}")
+                if attempt < self.MAX_RETRIES:
+                    time.sleep(self.RETRY_DELAY)
+
         if not rows:
             return self.candle_buffers.get(code, pd.DataFrame())
 
@@ -1140,15 +1222,19 @@ class RealtimeHandler:
             dt_str = row.get("체결시간", "")
             if len(dt_str) < 14:
                 continue
-            dt = datetime.strptime(dt_str, "%Y%m%d%H%M%S")
-            new_data.append({
-                "dt": dt,
-                "open": abs(int(float(str(row.get("시가", 0)).replace(",", "")))),
-                "high": abs(int(float(str(row.get("고가", 0)).replace(",", "")))),
-                "low": abs(int(float(str(row.get("저가", 0)).replace(",", "")))),
-                "close": abs(int(float(str(row.get("현재가", 0)).replace(",", "")))),
-                "volume": abs(int(float(str(row.get("거래량", 0)).replace(",", "")))),
-            })
+            try:
+                dt = datetime.strptime(dt_str, "%Y%m%d%H%M%S")
+                new_data.append({
+                    "dt": dt,
+                    "open": abs(int(float(str(row.get("시가", 0)).replace(",", "")))),
+                    "high": abs(int(float(str(row.get("고가", 0)).replace(",", "")))),
+                    "low": abs(int(float(str(row.get("저가", 0)).replace(",", "")))),
+                    "close": abs(int(float(str(row.get("현재가", 0)).replace(",", "")))),
+                    "volume": abs(int(float(str(row.get("거래량", 0)).replace(",", "")))),
+                })
+            except (ValueError, TypeError) as e:
+                log.warning(f"  분봉 파싱 오류 {code}: {e}")
+                continue
 
         if not new_data:
             return self.candle_buffers.get(code, pd.DataFrame())
@@ -1158,12 +1244,21 @@ class RealtimeHandler:
         # 기존 버퍼와 병합 (중복 제거)
         existing = self.candle_buffers.get(code, pd.DataFrame())
         if not existing.empty:
-            combined = pd.concat([existing[["dt", "open", "high", "low", "close", "volume"]],
-                                  new_df]).drop_duplicates(subset=["dt"]).sort_values("dt")
+            # 기존 버퍼에서 MA 컬럼 제거 후 병합 (재계산할 것이므로)
+            base_cols = ["dt", "open", "high", "low", "close", "volume"]
+            existing_base = existing[
+                [c for c in base_cols if c in existing.columns]
+            ]
+            combined = pd.concat([existing_base, new_df]).drop_duplicates(
+                subset=["dt"]
+            ).sort_values("dt")
         else:
             combined = new_df.sort_values("dt")
 
         combined = combined.reset_index(drop=True)
+
+        # [수정] add_all_ma가 groupby("date")로 동작하므로
+        # 장 간 경계 오염 없이 MA 계산됨
         combined = SyncTradeEngine.add_all_ma(combined)
         self.candle_buffers[code] = combined
         return combined
