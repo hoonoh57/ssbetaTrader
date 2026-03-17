@@ -70,27 +70,45 @@ class MinuteDownloader:
     def close(self):
         self.conn.close()
 
-    # ─── 서버 API 조회 ───
+    # ─── 서버 API 조회 (retry 포함) ───
     def fetch_minute_candles(self, code: str, tick: int,
-                              stop_time: str) -> List[Dict]:
+                              stop_time: str, max_retries: int = 3) -> List[Dict]:
         """
-        서버에서 분봉 조회
+        서버에서 분봉 조회 — 실패 시 최대 3회 재시도
         stop_time: yyyyMMddHHmmss — 이 시각 이전 데이터를 가져옴
         반환: 최대 900봉 (최신→과거 순)
         """
         url = f"{BASE_URL}/api/market/candles/minute"
         params = {"code": code, "tick": tick, "stopTime": stop_time}
-        try:
-            r = self.session.get(url, params=params, timeout=30)
-            res = r.json()
-            if res.get("Success") and res.get("Data"):
-                return res["Data"]
-            else:
-                log.warning(f"  조회 실패: {res.get('Message', 'unknown')}")
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                r = self.session.get(url, params=params, timeout=15)
+                r.raise_for_status()
+                res = r.json()
+                if res.get("Success") and res.get("Data"):
+                    return res["Data"]
+                else:
+                    log.warning(f"  조회 실패: {res.get('Message', 'unknown')}")
+                    return []
+            except requests.exceptions.Timeout:
+                log.warning(f"  API 타임아웃 (시도 {attempt}/{max_retries})")
+                if attempt < max_retries:
+                    time.sleep(2 * attempt)
+                    continue
+                log.error(f"  API 타임아웃 {max_retries}회 실패. 스킵.")
                 return []
-        except Exception as e:
-            log.error(f"  API 오류: {e}")
-            return []
+            except requests.exceptions.ConnectionError:
+                log.warning(f"  연결 오류 (시도 {attempt}/{max_retries})")
+                if attempt < max_retries:
+                    time.sleep(3 * attempt)
+                    continue
+                log.error(f"  연결 오류 {max_retries}회 실패. 스킵.")
+                return []
+            except Exception as e:
+                log.error(f"  API 오류: {e}")
+                return []
+        return []
 
     # ─── DB 저장 ───
     def save_candles(self, code: str, tick: int, rows: List[Dict]) -> int:

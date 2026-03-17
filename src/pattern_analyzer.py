@@ -271,7 +271,7 @@ class PatternAnalyzer:
         df_sig = self.load_minutes(SIGNAL_CODE, start_date, end_date)
 
         # 삼성전자 5분봉 등락률 > 1% 인 "급등 봉" 추출
-        df_sig["ret"] = df_sig["close"].pct_change() * 100
+        df_sig["ret"] = df_sig.groupby("date")["close"].pct_change() * 100
         surges = df_sig[df_sig["ret"] > 1.0].copy()
         surges["hour"] = surges["dt"].dt.hour
         surges["minute"] = surges["dt"].dt.minute
@@ -284,7 +284,7 @@ class PatternAnalyzer:
             df_tgt = self.load_minutes(target_code, start_date, end_date)
             if df_tgt.empty:
                 continue
-            df_tgt["ret"] = df_tgt["close"].pct_change() * 100
+            df_tgt["ret"] = df_tgt.groupby("date")["close"].pct_change() * 100
 
             response_lags = []
 
